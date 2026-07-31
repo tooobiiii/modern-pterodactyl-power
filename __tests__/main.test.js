@@ -7,56 +7,91 @@
  */
 import { jest } from '@jest/globals'
 import * as core from '../__fixtures__/core.js'
-import { wait } from '../__fixtures__/wait.js'
+import * as pterodactyl from '../__fixtures__/pterodactyl.js'
 
 // Mocks should be declared before the module being tested is imported.
 jest.unstable_mockModule('@actions/core', () => core)
-jest.unstable_mockModule('../src/wait.js', () => ({ wait }))
+jest.unstable_mockModule('../src/pterodactyl.js', () => pterodactyl)
 
 // The module being tested should be imported dynamically. This ensures that the
 // mocks are used in place of any actual dependencies.
 const { run } = await import('../src/main.js')
 
+const INPUTS = {
+  'panel-url': 'https://panel.example.com',
+  'bearer-token': 'ptlc_token',
+  'server-id': 'd3aac109',
+  action: 'restart'
+}
+
 describe('main.js', () => {
   beforeEach(() => {
-    // Set the action's inputs as return values from core.getInput().
-    core.getInput.mockImplementation(() => '500')
-
-    // Mock the wait function so that it does not actually wait.
-    wait.mockImplementation(() => Promise.resolve('done!'))
+    core.getInput.mockImplementation((name) => INPUTS[name] ?? '')
+    pterodactyl.createPterodactylClient.mockReturnValue(pterodactyl)
+    pterodactyl.sendPowerSignal.mockResolvedValue(undefined)
+    pterodactyl.getServerState.mockResolvedValue('starting')
   })
 
   afterEach(() => {
     jest.resetAllMocks()
   })
 
-  it('Sets the time output', async () => {
+  it('sends the requested signal and sets the outputs', async () => {
     await run()
 
-    // Verify the time output was set.
-    expect(core.setOutput).toHaveBeenNthCalledWith(
-      1,
-      'time',
-      // Simple regex to match a time string in the format HH:MM:SS.
-      expect.stringMatching(/^\d{2}:\d{2}:\d{2}/)
+    expect(pterodactyl.createPterodactylClient).toHaveBeenCalledWith({
+      panelUrl: 'https://panel.example.com',
+      bearerToken: 'ptlc_token'
+    })
+    expect(pterodactyl.sendPowerSignal).toHaveBeenCalledWith(
+      'd3aac109',
+      'restart'
+    )
+    expect(core.setOutput).toHaveBeenCalledWith('signal', 'restart')
+    expect(core.setOutput).toHaveBeenCalledWith('state', 'starting')
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('masks the API key', async () => {
+    await run()
+
+    expect(core.setSecret).toHaveBeenCalledWith('ptlc_token')
+  })
+
+  it('warns but succeeds when the state cannot be read', async () => {
+    pterodactyl.getServerState.mockRejectedValue(new Error('panel timed out'))
+
+    await run()
+
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining('panel timed out')
+    )
+    expect(core.setOutput).toHaveBeenCalledWith('state', '')
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it('fails the workflow when an input is invalid', async () => {
+    core.getInput.mockImplementation((name) =>
+      name === 'action' ? 'reboot' : INPUTS[name]
+    )
+
+    await run()
+
+    expect(pterodactyl.sendPowerSignal).not.toHaveBeenCalled()
+    expect(core.setFailed).toHaveBeenCalledWith(
+      expect.stringContaining('Unsupported power action "reboot"')
     )
   })
 
-  it('Sets a failed status', async () => {
-    // Clear the getInput mock and return an invalid value.
-    core.getInput.mockClear().mockReturnValueOnce('this is not a number')
-
-    // Clear the wait mock and return a rejected promise.
-    wait
-      .mockClear()
-      .mockRejectedValueOnce(new Error('milliseconds is not a number'))
+  it('fails the workflow when the panel rejects the signal', async () => {
+    pterodactyl.sendPowerSignal.mockRejectedValue(
+      new Error('Pterodactyl API responded with 404 Not Found')
+    )
 
     await run()
 
-    // Verify that the action was marked as failed.
-    expect(core.setFailed).toHaveBeenNthCalledWith(
-      1,
-      'milliseconds is not a number'
+    expect(core.setFailed).toHaveBeenCalledWith(
+      'Pterodactyl API responded with 404 Not Found'
     )
   })
 })

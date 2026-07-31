@@ -1,5 +1,6 @@
 import * as core from '@actions/core'
-import { wait } from './wait.js'
+import { readInputs } from './inputs.js'
+import { createPterodactylClient } from './pterodactyl.js'
 
 /**
  * The main function for the action.
@@ -8,20 +9,44 @@ import { wait } from './wait.js'
  */
 export async function run() {
   try {
-    const ms = core.getInput('milliseconds')
+    const { panelUrl, bearerToken, serverId, signal } = readInputs()
 
-    // Debug logs are only output if the `ACTIONS_STEP_DEBUG` secret is true
-    core.debug(`Waiting ${ms} milliseconds ...`)
+    // Keep the key out of the logs, even if a later error echoes it back.
+    core.setSecret(bearerToken)
 
-    // Log the current timestamp, wait, then log the new timestamp
-    core.debug(new Date().toTimeString())
-    await wait(parseInt(ms, 10))
-    core.debug(new Date().toTimeString())
+    const client = createPterodactylClient({ panelUrl, bearerToken })
 
-    // Set outputs for other workflow steps to use
-    core.setOutput('time', new Date().toTimeString())
+    core.info(`Sending "${signal}" to server ${serverId} on ${panelUrl}...`)
+    await client.sendPowerSignal(serverId, signal)
+    core.info('The panel accepted the power signal.')
+
+    const state = await readServerState(client, serverId)
+
+    core.setOutput('signal', signal)
+    core.setOutput('state', state)
   } catch (error) {
     // Fail the workflow run if an error occurs
     if (error instanceof Error) core.setFailed(error.message)
+  }
+}
+
+/**
+ * Reads the resulting server state. The power signal has already been
+ * delivered at this point, so a failure here is reported but not fatal.
+ *
+ * @param {import('./pterodactyl.js').PterodactylClient} client The API client.
+ * @param {string} serverId Server identifier or UUID.
+ * @returns {Promise<string>} The state, or an empty string if it is unknown.
+ */
+async function readServerState(client, serverId) {
+  try {
+    const state = await client.getServerState(serverId)
+    core.info(`Server ${serverId} is now "${state}".`)
+
+    return state
+  } catch (error) {
+    core.warning(`Could not read the server state: ${error.message}`)
+
+    return ''
   }
 }

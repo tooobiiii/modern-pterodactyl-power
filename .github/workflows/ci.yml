@@ -48,6 +48,14 @@ jobs:
     name: GitHub Actions Test
     runs-on: ubuntu-latest
 
+    # The action talks to a live panel, so every step is skipped unless the
+    # repository (or environment) provides credentials. Pull requests from
+    # forks never see secrets and therefore never power-cycle a server.
+    env:
+      PANEL_URL: ${{ secrets.PANEL_URL }}
+      BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+      SERVER_ID: ${{ secrets.SERVER_ID }}
+
     steps:
       - name: Checkout
         id: checkout
@@ -55,10 +63,17 @@ jobs:
 
       - name: Test Local Action
         id: test-action
+        if: env.PANEL_URL != '' && env.BEARER_TOKEN != '' && env.SERVER_ID != ''
         uses: ./
         with:
-          milliseconds: 2000
+          panel-url: ${{ env.PANEL_URL }}
+          bearer-token: ${{ env.BEARER_TOKEN }}
+          server-id: ${{ env.SERVER_ID }}
+          action: restart
 
       - name: Print Output
         id: output
-        run: echo "${{ steps.test-action.outputs.time }}"
+        if: steps.test-action.outcome == 'success'
+        run: |
+          echo "signal: ${{ steps.test-action.outputs.signal }}"
+          echo "state: ${{ steps.test-action.outputs.state }}"

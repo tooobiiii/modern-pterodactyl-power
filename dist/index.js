@@ -27952,6 +27952,38 @@ var ExitCode;
     ExitCode[ExitCode["Failure"] = 1] = "Failure";
 })(ExitCode || (ExitCode = {}));
 /**
+ * Registers a secret which will get masked from logs
+ *
+ * @param secret - Value of the secret to be masked
+ * @remarks
+ * This function instructs the Actions runner to mask the specified value in any
+ * logs produced during the workflow run. Once registered, the secret value will
+ * be replaced with asterisks (***) whenever it appears in console output, logs,
+ * or error messages.
+ *
+ * This is useful for protecting sensitive information such as:
+ * - API keys
+ * - Access tokens
+ * - Authentication credentials
+ * - URL parameters containing signatures (SAS tokens)
+ *
+ * Note that masking only affects future logs; any previous appearances of the
+ * secret in logs before calling this function will remain unmasked.
+ *
+ * @example
+ * ```typescript
+ * // Register an API token as a secret
+ * const apiToken = "abc123xyz456";
+ * setSecret(apiToken);
+ *
+ * // Now any logs containing this value will show *** instead
+ * console.log(`Using token: ${apiToken}`); // Outputs: "Using token: ***"
+ * ```
+ */
+function setSecret(secret) {
+    issueCommand('add-mask', {}, secret);
+}
+/**
  * Gets the value of an input.
  * Unless trimWhitespace is set to false in InputOptions, the value is also trimmed.
  * Returns an empty string if the value is not defined.
@@ -27962,6 +27994,12 @@ var ExitCode;
  */
 function getInput(name, options) {
     const val = process.env[`INPUT_${name.replace(/ /g, '_').toUpperCase()}`] || '';
+    if (options && options.required && !val) {
+        throw new Error(`Input required and not supplied: ${name}`);
+    }
+    if (options && options.trimWhitespace === false) {
+        return val;
+    }
     return val.trim();
 }
 /**
@@ -28006,19 +28044,346 @@ function debug(message) {
 function error(message, properties = {}) {
     issueCommand('error', toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
+/**
+ * Adds a warning issue
+ * @param message warning issue message. Errors will be converted to string via toString()
+ * @param properties optional properties to add to the annotation.
+ */
+function warning(message, properties = {}) {
+    issueCommand('warning', toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+}
+/**
+ * Writes info to log with console.log.
+ * @param message info message
+ */
+function info(message) {
+    process.stdout.write(message + os.EOL);
+}
 
 /**
- * Waits for a number of milliseconds.
+ * Power signals accepted by the Pterodactyl client API.
  *
- * @param {number} milliseconds The number of milliseconds to wait.
- * @returns {Promise<string>} Resolves with 'done!' after the wait is over.
+ * @see https://pterodactyl-api-docs.netvpx.com/docs/api/client/servers#power-management
  */
-async function wait(milliseconds) {
-  return new Promise((resolve) => {
-    if (isNaN(milliseconds)) throw new Error('milliseconds is not a number')
+const PowerSignals = Object.freeze({
+  START: 'start',
+  STOP: 'stop',
+  RESTART: 'restart',
+  KILL: 'kill'
+});
 
-    setTimeout(() => resolve('done!'), milliseconds);
-  })
+/** @type {readonly string[]} Every signal the panel understands. */
+const POWER_SIGNALS = Object.freeze(Object.values(PowerSignals));
+
+/**
+ * Normalizes user input into a signal the panel accepts.
+ *
+ * @param {string} value Raw input value, in any casing.
+ * @returns {string} The normalized signal.
+ * @throws {Error} If the value is not a supported power signal.
+ */
+function parsePowerSignal(value) {
+  const signal = String(value ?? '')
+    .trim()
+    .toLowerCase();
+
+  if (!POWER_SIGNALS.includes(signal)) {
+    throw new Error(
+      `Unsupported power action "${value}". Expected one of: ${POWER_SIGNALS.join(', ')}.`
+    )
+  }
+
+  return signal
+}
+
+/**
+ * Pterodactyl accepts both the short identifier (`d3aac109`) and the full
+ * server UUID. Both are alphanumeric with dashes, so anything else is either a
+ * typo or an attempt to break out of the API path.
+ */
+const SERVER_ID_PATTERN = /^[A-Za-z0-9-]+$/;
+
+/**
+ * @typedef {object} ActionInputs
+ * @property {string} panelUrl Panel origin without a trailing slash.
+ * @property {string} bearerToken Client API key.
+ * @property {string} serverId Server identifier or UUID.
+ * @property {string} signal Normalized power signal.
+ */
+
+/**
+ * Reads and validates every input declared in `action.yml`.
+ *
+ * @returns {ActionInputs} The validated inputs.
+ * @throws {Error} If a required input is missing or malformed.
+ */
+function readInputs() {
+  return {
+    panelUrl: parsePanelUrl(getInput('panel-url', { required: true })),
+    bearerToken: parseBearerToken(
+      getInput('bearer-token', { required: true })
+    ),
+    serverId: parseServerId(getInput('server-id', { required: true })),
+    signal: parsePowerSignal(getInput('action') || PowerSignals.RESTART)
+  }
+}
+
+/**
+ * @param {string} value Raw `panel-url` input.
+ * @returns {string} The panel base URL, without a trailing slash.
+ */
+function parsePanelUrl(value) {
+  let url;
+
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error(
+      `"panel-url" is not a valid URL: "${value}". Expected something like https://panel.example.com.`
+    )
+  }
+
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error(
+      `"panel-url" must use http or https, received "${url.protocol}".`
+    )
+  }
+
+  // Panels behind a reverse proxy can live under a sub path, so keep it.
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+}
+
+/**
+ * @param {string} value Raw `bearer-token` input.
+ * @returns {string} The trimmed token.
+ */
+function parseBearerToken(value) {
+  const token = value.trim();
+
+  if (token === '') {
+    throw new Error('"bearer-token" must not be empty.')
+  }
+
+  return token
+}
+
+/**
+ * @param {string} value Raw `server-id` input.
+ * @returns {string} The trimmed server identifier.
+ */
+function parseServerId(value) {
+  const serverId = value.trim();
+
+  if (!SERVER_ID_PATTERN.test(serverId)) {
+    throw new Error(
+      `"server-id" must be a Pterodactyl server identifier or UUID, received "${value}".`
+    )
+  }
+
+  return serverId
+}
+
+/** The client API is versioned through the Accept header, not the path. */
+const ACCEPT_HEADER = 'application/vnd.pterodactyl.v1+json';
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_RETRIES = 2;
+const DEFAULT_RETRY_DELAY_MS = 1_000;
+
+/** Transient failures: rate limiting and panel/proxy hiccups. */
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+/**
+ * @typedef {object} ClientOptions
+ * @property {string} panelUrl Panel base URL, without a trailing slash.
+ * @property {string} bearerToken Client API key.
+ * @property {typeof fetch} [fetchImpl] Injectable fetch, for tests.
+ * @property {(ms: number) => Promise<void>} [sleepImpl] Injectable sleep, for tests.
+ * @property {number} [timeoutMs] Per-request timeout.
+ * @property {number} [retries] Retry attempts for transient failures.
+ * @property {number} [retryDelayMs] Base delay for the exponential backoff.
+ */
+
+/**
+ * @typedef {object} PterodactylClient
+ * @property {(serverId: string, signal: string) => Promise<void>} sendPowerSignal
+ * @property {(serverId: string) => Promise<string>} getServerState
+ */
+
+/**
+ * Creates a client for the Pterodactyl client API.
+ *
+ * @param {ClientOptions} options Connection and resilience options.
+ * @returns {PterodactylClient} The client.
+ */
+function createPterodactylClient({
+  panelUrl,
+  bearerToken,
+  fetchImpl = fetch,
+  sleepImpl = sleep,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  retries = DEFAULT_RETRIES,
+  retryDelayMs = DEFAULT_RETRY_DELAY_MS
+}) {
+  /**
+   * Performs a request against the client API, retrying transient failures.
+   *
+   * @param {string} path API path, relative to the panel base URL.
+   * @param {RequestInit} [init] Additional fetch options.
+   * @returns {Promise<Response>} The successful response.
+   */
+  async function request(path, init = {}) {
+    const url = `${panelUrl}${path}`;
+    let lastError;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      if (attempt > 0) {
+        const delay = retryDelayMs * 2 ** (attempt - 1);
+        info(
+          `Retrying in ${delay}ms (attempt ${attempt + 1} of ${retries + 1})...`
+        );
+        await sleepImpl(delay);
+      }
+
+      try {
+        debug(`${init.method ?? 'GET'} ${url}`);
+
+        const response = await fetchImpl(url, {
+          ...init,
+          headers: {
+            Authorization: `Bearer ${bearerToken}`,
+            Accept: ACCEPT_HEADER,
+            'Content-Type': 'application/json',
+            ...init.headers
+          },
+          signal: AbortSignal.timeout(timeoutMs)
+        });
+
+        if (response.ok) return response
+
+        throw new PterodactylApiError(
+          await describeErrorResponse(response),
+          response.status
+        )
+      } catch (error) {
+        const isApiError = error instanceof PterodactylApiError;
+
+        lastError = isApiError
+          ? error
+          : new Error(`Request to ${url} failed: ${error.message}`, {
+              cause: error
+            });
+
+        // Anything that is not a response — DNS, TLS, timeouts — is worth
+        // another try; API errors only when the panel says they are transient.
+        if (isApiError && !RETRYABLE_STATUSES.has(error.status)) throw lastError
+      }
+    }
+
+    throw lastError
+  }
+
+  return {
+    /**
+     * Sends a power signal to a server. The panel answers `204 No Content`.
+     *
+     * @param {string} serverId Server identifier or UUID.
+     * @param {string} signal One of `start`, `stop`, `restart` or `kill`.
+     * @returns {Promise<void>} Resolves once the panel accepted the signal.
+     */
+    async sendPowerSignal(serverId, signal) {
+      await request(`/api/client/servers/${serverId}/power`, {
+        method: 'POST',
+        body: JSON.stringify({ signal })
+      });
+    },
+
+    /**
+     * Reads the current power state of a server.
+     *
+     * @param {string} serverId Server identifier or UUID.
+     * @returns {Promise<string>} The state, e.g. `running` or `starting`.
+     */
+    async getServerState(serverId) {
+      const response = await request(
+        `/api/client/servers/${serverId}/resources`
+      );
+      const body = await response.json();
+
+      return body?.attributes?.current_state ?? 'unknown'
+    }
+  }
+}
+
+/** An error carrying the HTTP status the panel replied with. */
+class PterodactylApiError extends Error {
+  /**
+   * @param {string} message Human readable description.
+   * @param {number} status The HTTP status code.
+   */
+  constructor(message, status) {
+    super(message);
+    this.name = 'PterodactylApiError';
+    this.status = status;
+  }
+}
+
+/**
+ * Turns an error response into a message worth putting in a workflow log.
+ *
+ * Pterodactyl reports failures as `{ errors: [{ code, status, detail }] }`.
+ *
+ * @param {Response} response The failed response.
+ * @returns {Promise<string>} A human readable description.
+ */
+async function describeErrorResponse(response) {
+  const prefix =
+    `Pterodactyl API responded with ${response.status} ${response.statusText}`.trimEnd();
+  const hint = HINTS_BY_STATUS[response.status];
+  const detail = await readErrorDetail(response);
+
+  return [prefix, detail, hint]
+    .filter(Boolean)
+    .map((part) => part.replace(/\.+$/, ''))
+    .join('. ')
+}
+
+const HINTS_BY_STATUS = {
+  401: 'Check that "bearer-token" is a client API key (ptlc_...) created under Account → API Credentials',
+  403: 'Client API keys start with "ptlc_"; an application key (ptla_) will not work here. Otherwise the account lacks the Control permission on this server',
+  404: 'Check "server-id" and that the key belongs to an account with access to it',
+  429: 'The panel is rate limiting this API key'
+};
+
+/**
+ * @param {Response} response The failed response.
+ * @returns {Promise<string>} The panel's own error details, if it sent any.
+ */
+async function readErrorDetail(response) {
+  const body = await response.text().catch(() => '');
+
+  try {
+    const errors = JSON.parse(body).errors;
+
+    if (Array.isArray(errors) && errors.length > 0) {
+      return errors
+        .map((error) => error.detail || error.code)
+        .filter(Boolean)
+        .join('; ')
+    }
+  } catch {
+    // Not JSON (a proxy error page, for instance) — fall through to the body.
+  }
+
+  return body.trim().slice(0, 500)
+}
+
+/**
+ * @param {number} ms Milliseconds to wait.
+ * @returns {Promise<void>} Resolves once the delay elapsed.
+ */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**
@@ -28028,21 +28393,45 @@ async function wait(milliseconds) {
  */
 async function run() {
   try {
-    const ms = getInput('milliseconds');
+    const { panelUrl, bearerToken, serverId, signal } = readInputs();
 
-    // Debug logs are only output if the `ACTIONS_STEP_DEBUG` secret is true
-    debug(`Waiting ${ms} milliseconds ...`);
+    // Keep the key out of the logs, even if a later error echoes it back.
+    setSecret(bearerToken);
 
-    // Log the current timestamp, wait, then log the new timestamp
-    debug(new Date().toTimeString());
-    await wait(parseInt(ms, 10));
-    debug(new Date().toTimeString());
+    const client = createPterodactylClient({ panelUrl, bearerToken });
 
-    // Set outputs for other workflow steps to use
-    setOutput('time', new Date().toTimeString());
+    info(`Sending "${signal}" to server ${serverId} on ${panelUrl}...`);
+    await client.sendPowerSignal(serverId, signal);
+    info('The panel accepted the power signal.');
+
+    const state = await readServerState(client, serverId);
+
+    setOutput('signal', signal);
+    setOutput('state', state);
   } catch (error) {
     // Fail the workflow run if an error occurs
     if (error instanceof Error) setFailed(error.message);
+  }
+}
+
+/**
+ * Reads the resulting server state. The power signal has already been
+ * delivered at this point, so a failure here is reported but not fatal.
+ *
+ * @param {import('./pterodactyl.js').PterodactylClient} client The API client.
+ * @param {string} serverId Server identifier or UUID.
+ * @returns {Promise<string>} The state, or an empty string if it is unknown.
+ */
+async function readServerState(client, serverId) {
+  try {
+    const state = await client.getServerState(serverId);
+    info(`Server ${serverId} is now "${state}".`);
+
+    return state
+  } catch (error) {
+    warning(`Could not read the server state: ${error.message}`);
+
+    return ''
   }
 }
 

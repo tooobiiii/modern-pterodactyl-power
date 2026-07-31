@@ -1,23 +1,42 @@
-name: The name of your action here
-description: Provide a description here
-author: Your name or organization here
+name: Modern Pterodactyl Power
+description:
+  An action that is built with a modern design, targeting the latest versions of
+  the Pterodactyl API.
+author: tooobiiii
 
 # Add your action's branding here. This will appear on the GitHub Marketplace.
 branding:
-  icon: heart
-  color: red
+  icon: power
+  color: purple
 
 # Define your inputs here.
 inputs:
-  milliseconds:
-    description: Your input description here
+  panel-url:
+    description: The URL of your Pterodactyl panel. (https://panel.example.com)
     required: true
-    default: '1000'
+
+  bearer-token:
+    description: A Pterodactyl client API key (ptlc_...).
+    required: true
+
+  server-id:
+    description: The identifier or UUID of the server to perform the action on.
+    required: true
+
+  action:
+    description: The power signal to send (start, stop, restart, kill).
+    required: false
+    default: restart
 
 # Define your outputs here.
 outputs:
-  time:
-    description: Your output description here
+  signal:
+    description: The power signal that was sent to the panel.
+
+  state:
+    description:
+      The power state reported by the panel right after the signal was
+      delivered, e.g. `starting` or `running`. Empty if it could not be read.
 
 runs:
   using: node24

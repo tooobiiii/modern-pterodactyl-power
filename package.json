@@ -1,20 +1,22 @@
 {
-  "name": "javascript-action",
-  "description": "GitHub Actions JavaScript Template",
+  "name": "modern-pterodactyl-power",
+  "description": "GitHub Action to send power signals to a Pterodactyl server",
   "version": "0.0.0",
-  "author": "",
+  "author": "tooobiiii",
   "type": "module",
   "private": true,
-  "homepage": "https://github.com/actions/javascript-action#readme",
+  "homepage": "https://github.com/tooobiiii/modern-pterodactyl-power#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/actions/javascript-action.git"
+    "url": "git+https://github.com/tooobiiii/modern-pterodactyl-power.git"
   },
   "bugs": {
-    "url": "https://github.com/actions/javascript-action/issues"
+    "url": "https://github.com/tooobiiii/modern-pterodactyl-power/issues"
   },
   "keywords": [
-    "actions"
+    "actions",
+    "pterodactyl",
+    "game-server"
   ],
   "exports": {
     ".": "./dist/index.js"
@@ -24,7 +26,7 @@
   },
   "scripts": {
     "bundle": "npm run format:write && npm run package",
-    "ci-test": "NODE_OPTIONS=--experimental-vm-modules NODE_NO_WARNINGS=1 npx jest",
+    "ci-test": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js",
     "coverage": "npx make-coverage-badge --output-path ./badges/coverage.svg",
     "format:write": "npx prettier --write .",
     "format:check": "npx prettier --check .",
@@ -32,7 +34,7 @@
     "local-action": "npx @github/local-action . src/main.js .env",
     "package": "npx rimraf ./dist && npx rollup --config rollup.config.js",
     "package:watch": "npm run package -- --watch",
-    "test": "NODE_OPTIONS=--experimental-vm-modules NODE_NO_WARNINGS=1 npx jest",
+    "test": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js",
     "all": "npm run format:write && npm run lint && npm run test && npm run coverage && npm run package"
   },
   "license": "MIT",
