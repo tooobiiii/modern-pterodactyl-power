@@ -57,7 +57,7 @@ Power signals are asynchronous: the panel answers `204 No Content` as soon as it
 accepts the signal, so `state` is typically `starting` or `stopping` rather than
 the final state. The action does not wait for the server to settle.
 
-### Behaviour on failure
+### Behavior on failure
 
 - Invalid inputs fail the step before any request is made.
 - API errors fail the step with the panel's own `detail` message, plus a hint
