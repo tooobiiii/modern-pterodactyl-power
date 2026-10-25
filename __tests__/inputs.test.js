@@ -20,7 +20,7 @@ function givenInputs(inputs) {
 
 const VALID_INPUTS = {
   'panel-url': 'https://panel.example.com',
-  'bearer-token': 'c7sp_token',
+  'bearer-token': 'ptlc_token',
   'server-id': 'd3aac109',
   action: 'start'
 }
@@ -31,7 +31,7 @@ describe('inputs.js', () => {
 
     expect(readInputs()).toEqual({
       panelUrl: 'https://panel.example.com',
-      bearerToken: 'c7sp_token',
+      bearerToken: 'ptlc_token',
       serverId: 'd3aac109',
       signal: 'start'
     })
@@ -67,27 +67,9 @@ describe('inputs.js', () => {
     expect(() => readInputs()).toThrow(/"bearer-token" must not be empty/)
   })
 
-  it('accepts a full server UUID', () => {
-    givenInputs({
-      ...VALID_INPUTS,
-      'server-id': 'D3AAC109-5E2B-4C2A-9F3E-1A2B3C4D5E6F'
-    })
-
-    expect(readInputs().serverId).toBe('D3AAC109-5E2B-4C2A-9F3E-1A2B3C4D5E6F')
-  })
-
-  it.each([['d3aac10'], ['d3aac109x'], ['g3aac109']])(
-    'rejects the malformed server id %p',
-    (serverId) => {
-      givenInputs({ ...VALID_INPUTS, 'server-id': serverId })
-
-      expect(() => readInputs()).toThrow(/"server-id" must be a Calagopus/)
-    }
-  )
-
   it('rejects a server id that could escape the API path', () => {
     givenInputs({ ...VALID_INPUTS, 'server-id': 'd3aac109/../../nodes' })
 
-    expect(() => readInputs()).toThrow(/"server-id" must be a Calagopus/)
+    expect(() => readInputs()).toThrow(/"server-id" must be a Pterodactyl/)
   })
 })

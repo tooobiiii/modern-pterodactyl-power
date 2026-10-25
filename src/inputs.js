@@ -2,12 +2,11 @@ import * as core from '@actions/core'
 import { PowerSignals, parsePowerSignal } from './signals.js'
 
 /**
- * Calagopus accepts both the short identifier (`d3aac109`, eight hex digits)
- * and the full server UUID. Anything else is either a typo or an attempt to
- * break out of the API path.
+ * Pterodactyl accepts both the short identifier (`d3aac109`) and the full
+ * server UUID. Both are alphanumeric with dashes, so anything else is either a
+ * typo or an attempt to break out of the API path.
  */
-const SERVER_ID_PATTERN =
-  /^[0-9a-f]{8}(?:-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/i
+const SERVER_ID_PATTERN = /^[A-Za-z0-9-]+$/
 
 /**
  * @typedef {object} ActionInputs
@@ -82,7 +81,7 @@ function parseServerId(value) {
 
   if (!SERVER_ID_PATTERN.test(serverId)) {
     throw new Error(
-      `"server-id" must be a Calagopus server identifier or UUID, received "${value}".`
+      `"server-id" must be a Pterodactyl server identifier or UUID, received "${value}".`
     )
   }
 

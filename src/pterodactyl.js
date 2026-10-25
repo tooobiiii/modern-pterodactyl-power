@@ -1,7 +1,7 @@
 import * as core from '@actions/core'
 
-/** The client API speaks plain JSON and is not versioned through headers. */
-const ACCEPT_HEADER = 'application/json'
+/** The client API is versioned through the Accept header, not the path. */
+const ACCEPT_HEADER = 'application/vnd.pterodactyl.v1+json'
 
 const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_RETRIES = 2
@@ -22,18 +22,18 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504])
  */
 
 /**
- * @typedef {object} CalagopusClient
+ * @typedef {object} PterodactylClient
  * @property {(serverId: string, signal: string) => Promise<void>} sendPowerSignal
  * @property {(serverId: string) => Promise<string>} getServerState
  */
 
 /**
- * Creates a client for the Calagopus client API.
+ * Creates a client for the Pterodactyl client API.
  *
  * @param {ClientOptions} options Connection and resilience options.
- * @returns {CalagopusClient} The client.
+ * @returns {PterodactylClient} The client.
  */
-export function createCalagopusClient({
+export function createPterodactylClient({
   panelUrl,
   bearerToken,
   fetchImpl = fetch,
@@ -78,12 +78,12 @@ export function createCalagopusClient({
 
         if (response.ok) return response
 
-        throw new CalagopusApiError(
+        throw new PterodactylApiError(
           await describeErrorResponse(response),
           response.status
         )
       } catch (error) {
-        const isApiError = error instanceof CalagopusApiError
+        const isApiError = error instanceof PterodactylApiError
 
         lastError = isApiError
           ? error
@@ -102,8 +102,7 @@ export function createCalagopusClient({
 
   return {
     /**
-     * Sends a power signal to a server. The panel only answers once Wings
-     * accepted the action, with an empty `200 OK` object.
+     * Sends a power signal to a server. The panel answers `204 No Content`.
      *
      * @param {string} serverId Server identifier or UUID.
      * @param {string} signal One of `start`, `stop`, `restart` or `kill`.
@@ -112,7 +111,7 @@ export function createCalagopusClient({
     async sendPowerSignal(serverId, signal) {
       await request(`/api/client/servers/${serverId}/power`, {
         method: 'POST',
-        body: JSON.stringify({ action: signal })
+        body: JSON.stringify({ signal })
       })
     },
 
@@ -128,20 +127,20 @@ export function createCalagopusClient({
       )
       const body = await response.json()
 
-      return body?.resources?.state ?? 'unknown'
+      return body?.attributes?.current_state ?? 'unknown'
     }
   }
 }
 
 /** An error carrying the HTTP status the panel replied with. */
-class CalagopusApiError extends Error {
+class PterodactylApiError extends Error {
   /**
    * @param {string} message Human readable description.
    * @param {number} status The HTTP status code.
    */
   constructor(message, status) {
     super(message)
-    this.name = 'CalagopusApiError'
+    this.name = 'PterodactylApiError'
     this.status = status
   }
 }
@@ -149,14 +148,14 @@ class CalagopusApiError extends Error {
 /**
  * Turns an error response into a message worth putting in a workflow log.
  *
- * Calagopus reports failures as `{ errors: ["message", ...] }`.
+ * Pterodactyl reports failures as `{ errors: [{ code, status, detail }] }`.
  *
  * @param {Response} response The failed response.
  * @returns {Promise<string>} A human readable description.
  */
 async function describeErrorResponse(response) {
   const prefix =
-    `Calagopus API responded with ${response.status} ${response.statusText}`.trimEnd()
+    `Pterodactyl API responded with ${response.status} ${response.statusText}`.trimEnd()
   const hint = HINTS_BY_STATUS[response.status]
   const detail = await readErrorDetail(response)
 
@@ -167,10 +166,9 @@ async function describeErrorResponse(response) {
 }
 
 const HINTS_BY_STATUS = {
-  401: 'Check that "bearer-token" is a client API key (c7sp_...) created under Account → API Keys',
-  403: 'Check that the API key is enabled, allows the runner\'s IP address and grants the "control" permissions for this server',
+  401: 'Check that "bearer-token" is a client API key (ptlc_...) created under Account → API Credentials',
+  403: 'Client API keys start with "ptlc_"; an application key (ptla_) will not work here. Otherwise the account lacks the Control permission on this server',
   404: 'Check "server-id" and that the key belongs to an account with access to it',
-  409: 'The server cannot be controlled right now, e.g. because it is suspended, installing, restoring a backup or being transferred',
   429: 'The panel is rate limiting this API key'
 }
 
@@ -186,7 +184,8 @@ async function readErrorDetail(response) {
 
     if (Array.isArray(errors) && errors.length > 0) {
       return errors
-        .filter((error) => typeof error === 'string' && error !== '')
+        .map((error) => error.detail || error.code)
+        .filter(Boolean)
         .join('; ')
     }
   } catch {

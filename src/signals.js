@@ -1,7 +1,7 @@
 /**
- * Power signals accepted by the Calagopus client API.
+ * Power signals accepted by the Pterodactyl client API.
  *
- * @see https://github.com/calagopus/panel/blob/main/backend/src/routes/api/client/servers/_server_/power.rs
+ * @see https://pterodactyl-api-docs.netvpx.com/docs/api/client/servers#power-management
  */
 export const PowerSignals = Object.freeze({
   START: 'start',

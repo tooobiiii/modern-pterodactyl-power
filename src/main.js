@@ -1,6 +1,6 @@
 import * as core from '@actions/core'
 import { readInputs } from './inputs.js'
-import { createCalagopusClient } from './calagopus.js'
+import { createPterodactylClient } from './pterodactyl.js'
 
 /**
  * The main function for the action.
@@ -14,7 +14,7 @@ export async function run() {
     // Keep the key out of the logs, even if a later error echoes it back.
     core.setSecret(bearerToken)
 
-    const client = createCalagopusClient({ panelUrl, bearerToken })
+    const client = createPterodactylClient({ panelUrl, bearerToken })
 
     core.info(`Sending "${signal}" to server ${serverId} on ${panelUrl}...`)
     await client.sendPowerSignal(serverId, signal)
@@ -34,7 +34,7 @@ export async function run() {
  * Reads the resulting server state. The power signal has already been
  * delivered at this point, so a failure here is reported but not fatal.
  *
- * @param {import('./calagopus.js').CalagopusClient} client The API client.
+ * @param {import('./pterodactyl.js').PterodactylClient} client The API client.
  * @param {string} serverId Server identifier or UUID.
  * @returns {Promise<string>} The state, or an empty string if it is unknown.
  */
